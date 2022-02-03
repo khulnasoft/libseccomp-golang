@@ -763,7 +763,9 @@ func checkAPI(op string, minLevel uint, major, minor, micro uint) error {
 // Calls to C.seccomp_notify* hidden from seccomp.go
 
 func notifSupported() error {
-	return checkAPI("seccomp notification", 6, 2, 5, 0)
+	// NOTE(toru): You can use it from API level 5 with some ingenuity.
+	// https://man7.org/linux/man-pages/man3/seccomp_api_get.3.html
+	return checkAPI("seccomp notification", 5, 2, 5, 0)
 }
 
 func (f *ScmpFilter) getNotifFd() (ScmpFd, error) {
