@@ -617,12 +617,13 @@ func NewFilter(defaultAction ScmpAction) (*ScmpFilter, error) {
 	filter.valid = true
 	runtime.SetFinalizer(filter, filterFinalizer)
 
-	// Enable TSync so all goroutines will receive the same rules.
-	// If the kernel does not support TSYNC, allow us to continue without error.
-	if err := filter.setFilterAttr(filterAttrTsync, 0x1); err != nil && err != syscall.ENOTSUP {
-		filter.Release()
-		return nil, fmt.Errorf("could not create filter - error setting tsync bit: %v", err)
-	}
+	// NOTE(toru): This setting together with seccomp notify is supported since linux kernel 5.7.
+	// // Enable TSync so all goroutines will receive the same rules.
+	// // If the kernel does not support TSYNC, allow us to continue without error.
+	// if err := filter.setFilterAttr(filterAttrTsync, 0x1); err != nil && err != syscall.ENOTSUP {
+	// 	filter.Release()
+	// 	return nil, fmt.Errorf("could not create filter - error setting tsync bit: %v", err)
+	// }
 
 	return filter, nil
 }
@@ -1182,4 +1183,27 @@ func NotifRespond(fd ScmpFd, scmpResp *ScmpNotifResp) error {
 // to mitigate time-of-check-time-of-use (TOCTOU) attacks as described in seccomp_notify_id_valid(2).
 func NotifIDValid(fd ScmpFd, id uint64) error {
 	return notifIDValid(fd, id)
+}
+
+// NOTE(toru): Under linux kernel 5.6, seccomp notify cannot be used without disabling TSYNC, so this feature has been restored.
+
+// SetTsync sets or clears the filter's thread-sync (TSYNC) attribute. When set, this attribute
+// tells the kernel to synchronize all threads of the calling process to the same seccomp filterk
+// When using filters with the seccomp notification action (ActNotify), the TSYNC attribute
+// must be cleared prior to loading the filter. Refer to the seccomp manual page (seccomp(2)) for
+// further details.
+func (f *ScmpFilter) SetTsync(val bool) error {
+	var cval C.uint32_t
+
+	if val == true {
+		cval = 1
+	} else {
+		cval = 0
+	}
+
+	err := f.setFilterAttr(filterAttrTsync, cval)
+	if err != nil && val == false && err == syscall.ENOTSUP {
+		return nil
+	}
+	return err
 }
