@@ -7,6 +7,7 @@
 package seccomp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -182,9 +183,9 @@ const (
 	// ActInvalid is a placeholder to ensure uninitialized ScmpAction
 	// variables are invalid
 	ActInvalid ScmpAction = iota
-	// ActKill kills the thread that violated the rule. It is the same as ActKillThread.
+	// ActKillThread kills the thread that violated the rule.
 	// All other threads from the same thread group will continue to execute.
-	ActKill
+	ActKillThread
 	// ActTrap throws SIGSYS
 	ActTrap
 	// ActNotify triggers a userspace notification. This action is only usable when
@@ -202,14 +203,16 @@ const (
 	// This action is only usable when libseccomp API level 3 or higher is
 	// supported.
 	ActLog
-	// ActKillThread kills the thread that violated the rule. It is the same as ActKill.
-	// All other threads from the same thread group will continue to execute.
-	ActKillThread
 	// ActKillProcess kills the process that violated the rule.
 	// All threads in the thread group are also terminated.
 	// This action is only usable when libseccomp API level 3 or higher is
 	// supported.
 	ActKillProcess
+	// ActKill kills the thread that violated the rule.
+	// All other threads from the same thread group will continue to execute.
+	//
+	// Deprecated: use ActKillThread
+	ActKill = ActKillThread
 )
 
 const (
@@ -243,8 +246,8 @@ const (
 )
 
 // ErrSyscallDoesNotExist represents an error condition where
-// libseccomp is unable to resolve the syscall
-var ErrSyscallDoesNotExist = fmt.Errorf("could not resolve syscall name")
+// libseccomp is unable to resolve the syscall.
+var ErrSyscallDoesNotExist = errors.New("could not resolve syscall name")
 
 const (
 	// Userspace notification response flags
@@ -385,7 +388,7 @@ func (a ScmpCompareOp) String() string {
 // String returns a string representation of a seccomp match action
 func (a ScmpAction) String() string {
 	switch a & 0xFFFF {
-	case ActKill, ActKillThread:
+	case ActKillThread:
 		return "Action: Kill thread"
 	case ActKillProcess:
 		return "Action: Kill process"
@@ -554,7 +557,7 @@ func MakeCondition(arg uint, comparison ScmpCompareOp, values ...uint64) (ScmpCo
 	} else if len(values) > 2 {
 		return condStruct, fmt.Errorf("conditions can have at most 2 arguments (%d given)", len(values))
 	} else if len(values) == 0 {
-		return condStruct, fmt.Errorf("must provide at least one value to compare against")
+		return condStruct, errors.New("must provide at least one value to compare against")
 	}
 
 	condStruct.Argument = arg
@@ -609,7 +612,7 @@ func NewFilter(defaultAction ScmpAction) (*ScmpFilter, error) {
 
 	fPtr := C.seccomp_init(defaultAction.toNative())
 	if fPtr == nil {
-		return nil, fmt.Errorf("could not create filter")
+		return nil, errors.New("could not create filter")
 	}
 
 	filter := new(ScmpFilter)
@@ -694,14 +697,14 @@ func (f *ScmpFilter) Merge(src *ScmpFilter) error {
 	defer src.lock.Unlock()
 
 	if !src.valid || !f.valid {
-		return fmt.Errorf("one or more of the filter contexts is invalid or uninitialized")
+		return errors.New("one or more of the filter contexts is invalid or uninitialized")
 	}
 
 	// Merge the filters
 	if retCode := C.seccomp_merge(f.filterCtx, src.filterCtx); retCode != 0 {
 		e := errRc(retCode)
 		if e == syscall.EINVAL {
-			return fmt.Errorf("filters could not be merged due to a mismatch in attributes or invalid filter")
+			return fmt.Errorf("filters could not be merged due to a mismatch in attributes or invalid filter: %w", e)
 		}
 		return e
 	}
@@ -1195,14 +1198,14 @@ func NotifIDValid(fd ScmpFd, id uint64) error {
 func (f *ScmpFilter) SetTsync(val bool) error {
 	var cval C.uint32_t
 
-	if val == true {
+	if val {
 		cval = 1
 	} else {
 		cval = 0
 	}
 
 	err := f.setFilterAttr(filterAttrTsync, cval)
-	if err != nil && val == false && err == syscall.ENOTSUP {
+	if err != nil && !val && err == syscall.ENOTSUP {
 		return nil
 	}
 	return err

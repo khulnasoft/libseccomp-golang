@@ -293,7 +293,7 @@ const (
 	archStart ScmpArch = ArchNative
 	archEnd   ScmpArch = ArchRISCV64
 	// Comparison boundaries to check for action validity
-	actionStart ScmpAction = ActKill
+	actionStart ScmpAction = ActKillThread
 	actionEnd   ScmpAction = ActKillProcess
 	// Comparison boundaries to check for comparison operator validity
 	compareOpStart ScmpCompareOp = CompareNotEqual
@@ -340,7 +340,7 @@ func ensureSupportedVersion() error {
 func getAPI() (uint, error) {
 	api := C.seccomp_api_get()
 	if api == 0 {
-		return 0, fmt.Errorf("API level operations are not supported")
+		return 0, errors.New("API level operations are not supported")
 	}
 
 	return uint(api), nil
@@ -349,11 +349,12 @@ func getAPI() (uint, error) {
 // Set the API level
 func setAPI(api uint) error {
 	if retCode := C.seccomp_api_set(C.uint(api)); retCode != 0 {
-		if errRc(retCode) == syscall.EOPNOTSUPP {
-			return fmt.Errorf("API level operations are not supported")
+		e := errRc(retCode)
+		if e == syscall.EOPNOTSUPP {
+			return errors.New("API level operations are not supported")
 		}
 
-		return fmt.Errorf("could not set API level: %v", retCode)
+		return fmt.Errorf("could not set API level: %w", e)
 	}
 
 	return nil
@@ -411,7 +412,7 @@ func (f *ScmpFilter) setFilterAttr(attr scmpFilterAttr, value C.uint32_t) error 
 // Wrapper for seccomp_rule_add_... functions
 func (f *ScmpFilter) addRuleWrapper(call ScmpSyscall, action ScmpAction, exact bool, length C.uint, cond C.scmp_cast_t) error {
 	if length != 0 && cond == nil {
-		return fmt.Errorf("null conditions list, but length is nonzero")
+		return errors.New("null conditions list, but length is nonzero")
 	}
 
 	var retCode C.int
@@ -430,7 +431,7 @@ func (f *ScmpFilter) addRuleWrapper(call ScmpSyscall, action ScmpAction, exact b
 		case syscall.EPERM, syscall.EACCES:
 			return errDefAction
 		case syscall.EINVAL:
-			return fmt.Errorf("two checks on same syscall argument")
+			return errors.New("two checks on same syscall argument")
 		default:
 			return e
 		}
@@ -455,7 +456,7 @@ func (f *ScmpFilter) addRuleGeneric(call ScmpSyscall, action ScmpAction, exact b
 	} else {
 		argsArr := C.make_arg_cmp_array(C.uint(len(conds)))
 		if argsArr == nil {
-			return fmt.Errorf("error allocating memory for conditions")
+			return errors.New("error allocating memory for conditions")
 		}
 		defer C.free(argsArr)
 
@@ -495,7 +496,7 @@ func sanitizeAction(in ScmpAction) error {
 	}
 
 	if inTmp != ActTrace && inTmp != ActErrno && (in&0xFFFF0000) != 0 {
-		return fmt.Errorf("highest 16 bits must be zeroed except for Trace and Errno")
+		return errors.New("highest 16 bits must be zeroed except for Trace and Errno")
 	}
 
 	return nil
@@ -629,8 +630,6 @@ func (a ScmpCompareOp) toNative() C.int {
 func actionFromNative(a C.uint32_t) (ScmpAction, error) {
 	aTmp := a & 0xFFFF
 	switch a & 0xFFFF0000 {
-	case C.C_ACT_KILL:
-		return ActKill, nil
 	case C.C_ACT_KILL_PROCESS:
 		return ActKillProcess, nil
 	case C.C_ACT_KILL_THREAD:
@@ -655,8 +654,6 @@ func actionFromNative(a C.uint32_t) (ScmpAction, error) {
 // Only use with sanitized actions, no error handling
 func (a ScmpAction) toNative() C.uint32_t {
 	switch a & 0xFFFF {
-	case ActKill:
-		return C.C_ACT_KILL
 	case ActKillProcess:
 		return C.C_ACT_KILL_PROCESS
 	case ActKillThread:
