@@ -1198,14 +1198,14 @@ func NotifIDValid(fd ScmpFd, id uint64) error {
 func (f *ScmpFilter) SetTsync(val bool) error {
 	var cval C.uint32_t
 
-	if val == true {
+	if val {
 		cval = 1
 	} else {
 		cval = 0
 	}
 
 	err := f.setFilterAttr(filterAttrTsync, cval)
-	if err != nil && val == false && err == syscall.ENOTSUP {
+	if err != nil && !val && err == syscall.ENOTSUP {
 		return nil
 	}
 	return err
